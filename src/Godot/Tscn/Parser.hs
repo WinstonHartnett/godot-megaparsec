@@ -7,10 +7,20 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE TemplateHaskell #-}
 
-module Godot.Tscn.Parser () where
+module Godot.Tscn.Parser
+  (GodotValue(..)
+  ,GodotSection(..)
+  ,TscnDescriptor(..)
+  ,TscnParsed(..)
+  ,GdnsDescriptor(..)
+  ,GdnsParsed(..)
+  ,GodotParsed(..)
+  ,tscnParser
+  ,gdnsParser) where
 
 import           Control.Applicative        ((<|>),liftA2)
 import           Control.Lens
+import           Control.Monad              (unless)
 
 import           Data.Char                  (isAlphaNum,isDigit,isUpper)
 import           Data.Either                (fromRight)
@@ -39,10 +49,7 @@ godotFloatP = do
   sign <- P.option "" optionalSign
   let takeDigits = P.takeWhile1P Nothing isDigit
   rational <- takeDigits <> P.string "." <> takeDigits
-  exponent <- P.option "" (P.try optionalSign)
-    <> P.string "e"
-    <> P.option "" optionalSign
-    <> takeDigits
+  exponent <- P.option "" (P.string "e" <> P.option "" optionalSign <> takeDigits)
   pure . fst . fromRight undefined . T.rational $ sign <> rational <> exponent
 
 godotIntP :: Parser Int
@@ -121,6 +128,7 @@ data GodotValue
 makeLenses ''GodotValue
 
 -- There aren't any lenses to unwrap sum types AFAIK :/
+-- Surely there's a better way to do this.
 unGodotConstructor k = fmap (\(GodotConstructor (n, a)) -> (n, a)) . M.lookup k
 
 unGodotConstructor' k = fromJust . unGodotConstructor k
@@ -152,7 +160,7 @@ unGodotArr' k = fromJust . unGodotArr k
 collectRest its = M.filterWithKey (\k _ -> k `S.member` S.fromList its)
 
 -- | As of Godot 3.3
-data TscnSection
+data GodotSection
   = ExtResourceSection
     { _extResourceSectionPath    :: T.Text
     , _extResourceSectionTy      :: T.Text
@@ -196,13 +204,19 @@ data TscnSection
       -- | Body of the configuration entry
     , _connectionSectionEntries :: M.HashMap T.Text GodotValue
     }
+  | ResourceSection
+    { _resourceSectionResourceName :: Maybe T.Text
+    , _resourceSectionClassName    :: Maybe T.Text
+    , _resourceSectionLibrary      :: Maybe (T.Text, [GodotValue])
+    }
   | OtherSection
-    { _otherSectionHeaders :: M.HashMap T.Text GodotValue
+    { _otherSectionHeader  :: T.Text
+    , _otherSectionHeaders :: M.HashMap T.Text GodotValue
     , _otherSectionEntries :: M.HashMap T.Text GodotValue
     }
   deriving (Show,Generic)
 
-makeFields ''TscnSection
+makeFields ''GodotSection
 
 data TscnDescriptor =
   TscnDescriptor
@@ -216,7 +230,7 @@ makeFields ''TscnDescriptor
 data TscnParsed =
   TscnParsed
   { _tscnParsedDescriptor :: TscnDescriptor
-  , _tscnParsedSections   :: [TscnSection]
+  , _tscnParsedSections   :: [GodotSection]
   }
   deriving (Show,Generic)
 
@@ -235,7 +249,7 @@ makeFields ''GdnsDescriptor
 data GdnsParsed =
   GdnsParsed
   { _gdnsParsedDescriptor :: GdnsDescriptor
-  , _gdnsParsedSections   :: [TscnSection]
+  , _gdnsParsedSections   :: [GodotSection]
   }
   deriving (Show,Generic)
 
@@ -254,38 +268,49 @@ tscnHeaderKVP = liftA2 (,) (P.takeWhileP Nothing (/= '=')) (P.char '=' *> godotV
 headerKvs :: Parser (M.HashMap T.Text GodotValue)
 headerKvs = M.fromList <$> tscnHeaderKVP `P.sepBy` P.char ' '
 
-headerWrapper
-  :: T.Text
-  -> (M.HashMap T.Text GodotValue -> M.HashMap T.Text GodotValue -> TscnSection)
-  -> Parser TscnSection
-headerWrapper targetSect p = do
-  -- parse header
-  kvs <- P.string ("[" <> targetSect <> " ") *> headerKvs <* P.char ']' <* P.space
-  -- parse body
+bodyAndKvs :: Parser (T.Text, M.HashMap T.Text GodotValue, M.HashMap T.Text GodotValue)
+bodyAndKvs = do
+  headerName <- P.char '[' *> P.takeWhile1P Nothing (/= ' ') <* P.char ' '
+  headerKvs' <- headerKvs
+  P.char ']'
+  P.space
   let tscnBodyP  = do
         let parseKV =
               liftA2 (,) (P.takeWhileP Nothing (/= ' '))
               (P.string " = " *> godotValueP <* P.newline)
-        M.fromList
-          <$> P.manyTill parseKV (P.choice (map P.try [P.newline $> (), P.eof]))
-          P.<?> "body kvs"
+        M.fromList <$> P.manyTill parseKV (P.try (P.newline $> ()) <|> P.try P.eof)
       emptyBodyP = pure M.empty
-  (p kvs <$> P.choice (map P.try [tscnBodyP, emptyBodyP])) <* P.space
+  body <- P.try tscnBodyP <|> P.try emptyBodyP
+  pure (headerName, headerKvs', body) <* P.space
 
-tscnSubResourceP :: Parser TscnSection
+-- | Parse a section header nam, header key-values, and body key-values using a provided
+-- conversion function.
+headerWrapper
+  :: T.Text
+  -> (M.HashMap T.Text GodotValue -> M.HashMap T.Text GodotValue -> GodotSection)
+  -> Parser GodotSection
+headerWrapper targetSect p = do
+  (headerName, headerKvs', bodyKvs) <- bodyAndKvs
+  unless (headerName == targetSect) (fail "mismatched expected header")
+  pure $ p headerKvs' bodyKvs
+
+-- | Parse a `[sub_resource]` section.
+tscnSubResourceP :: Parser GodotSection
 tscnSubResourceP =
   headerWrapper "sub_resource"
   (\kvs bodyKvs -> SubResourceSection (unGodotString' "type" kvs) (unGodotInt' "id" kvs)
    (collectRest ["type", "id"] kvs) bodyKvs)
 
-tscnExtResourceP :: Parser TscnSection
+-- | Parse an `[ext_resource]` section.
+tscnExtResourceP :: Parser GodotSection
 tscnExtResourceP =
   headerWrapper "ext_resource"
   (\kvs bodyKvs -> ExtResourceSection (unGodotString' "path" kvs)
    (unGodotString' "type" kvs) (unGodotInt' "id" kvs)
    (collectRest ["path", "type", "id"] kvs) bodyKvs)
 
-tscnNodeP :: Parser TscnSection
+-- | Parse a `[node]` section.
+tscnNodeP :: Parser GodotSection
 tscnNodeP =
   headerWrapper "node"
   (\kvs bodyKvs -> NodeSection (unGodotString "type" kvs) (unGodotString' "name" kvs)
@@ -304,14 +329,15 @@ tscnNodeP =
     , "index"
     , "groups"] kvs) bodyKvs)
 
-tscnConnectionP :: Parser TscnSection
+-- | Parse a `[connection]` section.
+tscnConnectionP :: Parser GodotSection
 tscnConnectionP =
   headerWrapper "connection"
   (\kvs bodyKvs -> ConnectionSection (unGodotString' "signal" kvs)
    (unGodotString' "from" kvs) (unGodotString' "to" kvs) (unGodotString' "method" kvs)
    (collectRest ["signal", "from", "to", "method"] kvs) bodyKvs)
 
--- | This parser can only process automatically generated Godot `.tscn` files.
+-- | Parse a `tscn` file.
 tscnParser :: Parser TscnParsed
 tscnParser = do
   kvs <- P.string "[gd_scene " *> headerKvs <* P.char ']' <* P.space
@@ -323,18 +349,30 @@ tscnParser = do
   sections <- P.manyTill sectionP P.eof
   pure $ TscnParsed (TscnDescriptor loadSteps format) sections
 
+-- | Parse a `[resource]` section.
+resourceParser :: Parser GodotSection
+resourceParser = do
+  (headerName, headerKvs, bodyKvs) <- bodyAndKvs
+  pure
+    $ ResourceSection (unGodotString "resource_name" bodyKvs)
+    (unGodotString "class_name" bodyKvs) (unGodotConstructor "library" bodyKvs)
+
+-- | Parse a `gdns` file.
 gdnsParser :: Parser GdnsParsed
 gdnsParser = do
   kvs <- P.string "[gd_resource " *> headerKvs <* P.char ']' <* P.space
   let ty        = unGodotString' "type" kvs
       loadSteps = unGodotInt' "load_steps" kvs
       format    = unGodotInt' "format" kvs
-      sectionP  =
-        P.choice
-        (map P.try [tscnConnectionP, tscnExtResourceP, tscnSubResourceP, tscnNodeP])
+      sectionP  = P.choice (map P.try [tscnExtResourceP, resourceParser])
   sections <- P.manyTill sectionP P.eof
   pure $ GdnsParsed (GdnsDescriptor ty loadSteps format) sections
 
+otherParser :: Parser GodotSection
+otherParser = do
+  (headerName, headerKvs, bodyKvs) <- bodyAndKvs
+  pure $ OtherSection headerName headerKvs bodyKvs
+
+-- | Parse a resource file (currently only `tscn` and `gdns`).
 godotParser :: Parser GodotParsed
 godotParser = P.try (Tscn <$> tscnParser) <|> P.try (Gdns <$> gdnsParser)
-
