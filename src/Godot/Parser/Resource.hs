@@ -111,7 +111,7 @@ godotValueP = do
     'n'       -> godotNullP
     l
       | isUpper l || l == '@' -> GodotConstructor <$> godotConstructorP
-    otherwise -> P.try (GodotFloat <$> godotFloatP) <|> P.try (GodotInt <$> godotIntP)
+    _ -> P.try (GodotFloat <$> godotFloatP) <|> P.try (GodotInt <$> godotIntP)
 
 -- | Values parsed from a Tscn file.
 data GodotValue
@@ -281,7 +281,7 @@ bodyAndKvs = do
         M.fromList <$> P.manyTill parseKV (P.try (P.newline $> ()) <|> P.try P.eof)
       emptyBodyP = pure M.empty
   body <- P.try tscnBodyP <|> P.try emptyBodyP
-  pure (headerName, headerKvs', body) <* P.space
+  (headerName, headerKvs', body) <$ P.space
 
 -- | Parse a section header nam, header key-values, and body key-values using a provided
 -- conversion function.
@@ -317,7 +317,7 @@ tscnNodeP =
    (unGodotString "parent" kvs)
    ((\(GodotInt i) -> i) . head . snd <$> unGodotConstructor "instance" kvs)
    (unGodotString "instance_placeholder" kvs) (unGodotString "owner" kvs)
-   (unGodotInt "index" kvs) (fmap (map (\(GodotString i) -> i)) $ unGodotArr "groups" kvs)
+   (unGodotInt "index" kvs) (map (\(GodotString i) -> i) <$> unGodotArr "groups" kvs)
    (collectRest
     [ "path"
     , "type"
