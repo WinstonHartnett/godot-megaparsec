@@ -1,4 +1,4 @@
-# `tscn-megaparsec`
+# `godot-megaparsec`
 
 A Godot resource file parser.
 
