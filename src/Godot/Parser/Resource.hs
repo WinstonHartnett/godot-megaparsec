@@ -7,7 +7,7 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE TemplateHaskell #-}
 
-module Godot.Tscn.Parser
+module Godot.Parser.Resource
   (GodotValue(..)
   ,GodotSection(..)
   ,TscnDescriptor(..)
