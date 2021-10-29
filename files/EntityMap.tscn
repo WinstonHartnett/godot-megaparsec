@@ -15,6 +15,7 @@ script = SubResource( 1 )
 
 [node name="MeshInstance" type="MeshInstance" parent="."]
 mesh = SubResource( 2 )
+testArr = [1, 2,]
 material/0 = null
 
 [node name="HoverCamera" type="Camera" parent="."]
