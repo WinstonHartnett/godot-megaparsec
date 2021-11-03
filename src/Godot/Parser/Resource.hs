@@ -12,12 +12,7 @@ A parser for Godot resource file formats. Currently only supports auto-generated
 -}
 {-# LANGUAGE DeriveGeneric #-}
 
-{-# LANGUAGE FlexibleInstances #-}
-{-# LANGUAGE FunctionalDependencies #-}
-{-# LANGUAGE MultiParamTypeClasses #-}
-
 {-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE TemplateHaskell #-}
 
 module Godot.Parser.Resource
   (GodotValue(..)
@@ -31,12 +26,10 @@ module Godot.Parser.Resource
   ,gdnsParser) where
 
 import           Control.Applicative        ((<|>),liftA2)
-import           Control.Lens
 import           Control.Monad              (unless)
 
 import           Data.Char                  (isAlphaNum,isDigit,isUpper)
 import           Data.Either                (fromRight)
-import           Data.Foldable              (foldl')
 import           Data.Functor               (($>))
 import qualified Data.HashMap.Lazy          as M
 import qualified Data.HashSet               as S
@@ -115,15 +108,15 @@ godotValueP :: Parser GodotValue
 godotValueP = do
   nc <- T.head . P.stateInput <$> P.getParserState
   case nc of
-    '"'       -> GodotString <$> godotStringP
-    '['       -> GodotArr <$> godotArrP
-    '{'       -> GodotDict <$> godotDictP
-    't'       -> GodotBool <$> godotBoolP
-    'f'       -> GodotBool <$> godotBoolP
-    'n'       -> godotNullP
+    '"' -> GodotString <$> godotStringP
+    '[' -> GodotArr <$> godotArrP
+    '{' -> GodotDict <$> godotDictP
+    't' -> GodotBool <$> godotBoolP
+    'f' -> GodotBool <$> godotBoolP
+    'n' -> godotNullP
     l
       | isUpper l || l == '@' -> GodotConstructor <$> godotConstructorP
-    _ -> P.try (GodotFloat <$> godotFloatP) <|> P.try (GodotInt <$> godotIntP)
+    _   -> P.try (GodotFloat <$> godotFloatP) <|> P.try (GodotInt <$> godotIntP)
 
 -- | Values parsed from a Tscn file.
 data GodotValue
@@ -136,8 +129,6 @@ data GodotValue
   | GodotArr [GodotValue]
   | GodotNull
   deriving (Show,Generic,Eq)
-
-makeLenses ''GodotValue
 
 -- There aren't any lenses to unwrap sum types AFAIK :/
 -- Surely there's a better way to do this.
@@ -229,8 +220,6 @@ data GodotSection
     }
   deriving (Show,Generic)
 
-makeFields ''GodotSection
-
 -- | `tscn` file descriptor.
 data TscnDescriptor =
   TscnDescriptor
@@ -239,8 +228,6 @@ data TscnDescriptor =
   }
   deriving (Show,Generic)
 
-makeFields ''TscnDescriptor
-
 -- | Parsed `tscn` file.
 data TscnParsed =
   TscnParsed
@@ -248,8 +235,6 @@ data TscnParsed =
   , _tscnParsedSections   :: [GodotSection]
   }
   deriving (Show,Generic)
-
-makeFields ''TscnParsed
 
 -- | `gdns` file descriptor.
 data GdnsDescriptor =
@@ -260,8 +245,6 @@ data GdnsDescriptor =
   }
   deriving (Show,Generic)
 
-makeFields ''GdnsDescriptor
-
 -- | Parsed `gdns` file.
 data GdnsParsed =
   GdnsParsed
@@ -270,15 +253,11 @@ data GdnsParsed =
   }
   deriving (Show,Generic)
 
-makeFields ''GdnsParsed
-
 -- | Parsed godot resource file.
 data GodotParsed
   = Tscn TscnParsed
   | Gdns GdnsParsed
   deriving (Show,Generic)
-
-makeFields ''GodotParsed
 
 tscnHeaderKVP :: Parser (T.Text, GodotValue)
 tscnHeaderKVP = liftA2 (,) (P.takeWhileP Nothing (/= '=')) (P.char '=' *> godotValueP)

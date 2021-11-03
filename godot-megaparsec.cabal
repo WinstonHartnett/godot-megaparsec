@@ -1,6 +1,6 @@
 cabal-version:      2.4
 name:               godot-megaparsec
-version:            0.1.0.0
+version:            0.1.1.0
 
 -- A short (one-line) description of the package.
 synopsis:           Megaparsec parser for Godot `tscn` and `gdns` files.
@@ -29,7 +29,9 @@ source-repository head
   location: https://github.com/WinstonHartnett/godot-megaparsec.git
 
 library
-  exposed-modules:  Godot.Parser.Resource
+  exposed-modules:
+    Godot.Parser.Resource
+    Godot.Parser.Resource.Lens
 
   -- Modules included in this library but not exported.
   -- other-modules:
