@@ -21,4 +21,8 @@ makeFields ''GdnsDescriptor
 
 makeFields ''GdnsParsed
 
+makeFields ''OtherDescriptor
+
+makeFields ''OtherParsed
+
 makeFields ''GodotParsed

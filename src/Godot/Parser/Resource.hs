@@ -19,11 +19,15 @@ module Godot.Parser.Resource
   ,GodotSection(..)
   ,TscnDescriptor(..)
   ,TscnParsed(..)
+  ,OtherDescriptor(..)
+  ,OtherParsed(..)
   ,GdnsDescriptor(..)
   ,GdnsParsed(..)
   ,GodotParsed(..)
   ,tscnParser
-  ,gdnsParser) where
+  ,gdnsParser
+  ,otherParser
+  ,godotParser) where
 
 import           Control.Applicative        ((<|>),liftA2)
 import           Control.Monad              (unless)
@@ -39,6 +43,8 @@ import qualified Data.Text.Read             as T
 import           Data.Void
 
 import           GHC.Generics               (Generic)
+
+import           Prelude                    hiding (exponent)
 
 import qualified Text.Megaparsec            as P
 import qualified Text.Megaparsec.Char       as P
@@ -119,6 +125,8 @@ godotValueP = do
     _   -> P.try (GodotFloat <$> godotFloatP) <|> P.try (GodotInt <$> godotIntP)
 
 -- | Values parsed from a Tscn file.
+--
+-- Constructors are `(constructor name, constructor args)`.
 data GodotValue
   = GodotConstructor (T.Text, [GodotValue])
   | GodotInt Int
@@ -164,38 +172,43 @@ collectRest its = M.filterWithKey (\k _ -> k `S.member` S.fromList its)
 
 -- | Godot resource section prefixed with a bracket-enclosed header, optionally
 -- with body entries.
+--
+-- Header entries not specified in a record are accessed with the relevant `headers` field.
+-- Likewise, body entries not specified are accessed with the `entries` field.
+-- Note that explicitly specified section fields are not duplicated in `headers` and
+-- `entries` fields.
 data GodotSection
   = ExtResourceSection
     { _extResourceSectionPath    :: T.Text
     , _extResourceSectionTy      :: T.Text
     , _extResourceSectionId      :: Int
-      -- | Other header information
+      -- | Other header information.
     , _extResourceSectionHeaders :: M.HashMap T.Text GodotValue
-      -- | Body of the configuration entry
+      -- | Body of the configuration entry.
     , _extResourceSectionEntries :: M.HashMap T.Text GodotValue
     }
   | SubResourceSection
     { _subResourceSectionTy      :: T.Text
     , _subResourceSectionId      :: Int
-      -- | Other header information
+      -- | Other header information.
     , _subResourceSectionHeaders :: M.HashMap T.Text GodotValue
-      -- | Body of the configuration entry
+      -- | Body of the configuration entry.
     , _subResourceSectionEntries :: M.HashMap T.Text GodotValue
     }
   | NodeSection
     { _nodeSectionTy :: Maybe T.Text
     , _nodeSectionName :: T.Text
-      -- | If Nothing, then this node is the root
+      -- | If `Nothing`, then this node is the root.
     , _nodeSectionParent :: Maybe T.Text
-      -- | Instance is GodotConstructor
+      -- | Instance refers to an `ExtResource` ID, usually listed at the top of a file.
     , _nodeSectionInst :: Maybe Int
     , _nodeSectionInstPlaceholder :: Maybe T.Text
     , _nodeSectionOwner :: Maybe T.Text
     , _nodeSectionIndex :: Maybe Int
     , _nodeSectionGroups :: Maybe [T.Text]
-      -- | Other header information
+      -- | Other header information.
     , _nodeSectionHeaders :: M.HashMap T.Text GodotValue
-      -- | Body of the configuration entry
+      -- | Body of the configuration entry.
     , _nodeSectionEntries :: M.HashMap T.Text GodotValue
     }
   | ConnectionSection
@@ -203,9 +216,9 @@ data GodotSection
     , _connectionSectionFrom    :: T.Text
     , _connectionSectionTo      :: T.Text
     , _connectionSectionMethod  :: T.Text
-      -- | Other header information
+      -- | Other header information.
     , _connectionSectionHeaders :: M.HashMap T.Text GodotValue
-      -- | Body of the configuration entry
+      -- | Body of the configuration entry.
     , _connectionSectionEntries :: M.HashMap T.Text GodotValue
     }
   | ResourceSection
@@ -253,10 +266,27 @@ data GdnsParsed =
   }
   deriving (Show,Generic)
 
+-- | An unknown file descriptor.
+data OtherDescriptor =
+  OtherDescriptor
+  { _otherDescriptorHeaderName :: T.Text
+  , _otherDescriptorHeaders    :: M.HashMap T.Text GodotValue
+  }
+  deriving (Show,Generic)
+
+-- | An unknown file parsing result.
+data OtherParsed =
+  OtherParsed
+  { _otherParsedDescriptor :: OtherDescriptor
+  , _otherParsedSections   :: [GodotSection]
+  }
+  deriving (Show,Generic)
+
 -- | Parsed godot resource file.
 data GodotParsed
   = Tscn TscnParsed
   | Gdns GdnsParsed
+  | Other OtherParsed
   deriving (Show,Generic)
 
 tscnHeaderKVP :: Parser (T.Text, GodotValue)
@@ -334,6 +364,12 @@ tscnConnectionP =
    (unGodotString' "from" kvs) (unGodotString' "to" kvs) (unGodotString' "method" kvs)
    (collectRest ["signal", "from", "to", "method"] kvs) bodyKvs)
 
+-- | Parse an unspecified section.
+otherP :: Parser GodotSection
+otherP = do
+  (headerName, headerKvs', bodyKvs) <- bodyAndKvs
+  pure $ OtherSection headerName headerKvs' bodyKvs
+
 -- | Parse a `tscn` file.
 tscnParser :: Parser TscnParsed
 tscnParser = do
@@ -342,17 +378,17 @@ tscnParser = do
       format    = unGodotInt' "format" kvs
       sectionP  =
         P.choice
-        (map P.try [tscnConnectionP, tscnExtResourceP, tscnSubResourceP, tscnNodeP])
+        (map P.try
+         [tscnConnectionP, tscnExtResourceP, tscnSubResourceP, tscnNodeP, otherP])
   sections <- P.manyTill sectionP P.eof
   pure $ TscnParsed (TscnDescriptor loadSteps format) sections
 
 -- | Parse a `[resource]` section.
-resourceParser :: Parser GodotSection
-resourceParser = do
-  (headerName, headerKvs, bodyKvs) <- bodyAndKvs
-  pure
-    $ ResourceSection (unGodotString "resource_name" bodyKvs)
-    (unGodotString "class_name" bodyKvs) (unGodotConstructor "library" bodyKvs)
+resourceP :: Parser GodotSection
+resourceP =
+  headerWrapper "resource"
+  (\_ bodyKvs -> ResourceSection (unGodotString "resource_name" bodyKvs)
+   (unGodotString "class_name" bodyKvs) (unGodotConstructor "library" bodyKvs))
 
 -- | Parse a `gdns` file.
 gdnsParser :: Parser GdnsParsed
@@ -361,15 +397,19 @@ gdnsParser = do
   let ty        = unGodotString' "type" kvs
       loadSteps = unGodotInt' "load_steps" kvs
       format    = unGodotInt' "format" kvs
-      sectionP  = P.choice (map P.try [tscnExtResourceP, resourceParser])
+      sectionP  = P.choice (map P.try [tscnExtResourceP, resourceP, otherP])
   sections <- P.manyTill sectionP P.eof
   pure $ GdnsParsed (GdnsDescriptor ty loadSteps format) sections
 
-otherParser :: Parser GodotSection
+-- | Parse an unknown resource file.
+otherParser :: Parser OtherParsed
 otherParser = do
-  (headerName, headerKvs, bodyKvs) <- bodyAndKvs
-  pure $ OtherSection headerName headerKvs bodyKvs
+  hName <- P.char '[' *> P.takeWhile1P Nothing (/= ' ') <* P.char ' '
+  hKvs <- headerKvs <* P.char ']' <* P.space
+  sections <- P.manyTill otherP P.eof
+  pure $ OtherParsed (OtherDescriptor hName hKvs) sections
 
--- | Parse a resource file (currently only `tscn` and `gdns`).
+-- | Parse some Godot resource file.
 godotParser :: Parser GodotParsed
-godotParser = P.try (Tscn <$> tscnParser) <|> P.try (Gdns <$> gdnsParser)
+godotParser =
+  P.choice (map P.try [Tscn <$> tscnParser, Gdns <$> gdnsParser, Other <$> otherParser])
