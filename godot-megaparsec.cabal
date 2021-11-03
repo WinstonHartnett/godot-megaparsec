@@ -41,7 +41,6 @@ library
   ghc-options:      -Wall
   build-depends:
     , base                  >= 4.14.0 && < 5
-    , generic-lens          >= 2.2.0 && < 2.3
     , lens                  >= 5.0.1 && < 5.1
     , megaparsec            >= 9.2.0 && < 9.3
     , text                  >= 1.2.4 && < 1.3

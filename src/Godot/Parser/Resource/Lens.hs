@@ -11,18 +11,18 @@ import           Godot.Parser.Resource
 
 makeLenses ''GodotValue
 
-makeFields ''GodotSection
+makeLenses ''GodotSection
 
-makeFields ''TscnDescriptor
+makeLenses ''TscnDescriptor
 
-makeFields ''TscnParsed
+makeLenses ''TscnParsed
 
-makeFields ''GdnsDescriptor
+makeLenses ''GdnsDescriptor
 
-makeFields ''GdnsParsed
+makeLenses ''GdnsParsed
 
-makeFields ''OtherDescriptor
+makeLenses ''OtherDescriptor
 
-makeFields ''OtherParsed
+makeLenses ''OtherParsed
 
-makeFields ''GodotParsed
+makeLenses ''GodotParsed
