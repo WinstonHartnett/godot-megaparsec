@@ -1,3 +1,15 @@
+{-|
+Module      : Godot.Parser.Resource
+Description : Megaparsec parser for the Godot resource file format.
+Copyright   : (c) Winston Hartnett, 2021
+License     : GPL-3
+Maintainer  : whartnett@gmail.com
+Stability   : experimental
+Portability : POSIX
+
+A parser for Godot resource file formats. Currently only supports auto-generated
+`tscn` and `gdns` files.
+-}
 {-# LANGUAGE DeriveGeneric #-}
 
 {-# LANGUAGE FlexibleInstances #-}
@@ -159,7 +171,8 @@ unGodotArr' k = fromJust . unGodotArr k
 
 collectRest its = M.filterWithKey (\k _ -> k `S.member` S.fromList its)
 
--- | As of Godot 3.3
+-- | Godot resource section prefixed with a bracket-enclosed header, optionally
+-- with body entries.
 data GodotSection
   = ExtResourceSection
     { _extResourceSectionPath    :: T.Text
@@ -218,6 +231,7 @@ data GodotSection
 
 makeFields ''GodotSection
 
+-- | `tscn` file descriptor.
 data TscnDescriptor =
   TscnDescriptor
   { _tscnDescriptorLoadSteps :: Int
@@ -227,6 +241,7 @@ data TscnDescriptor =
 
 makeFields ''TscnDescriptor
 
+-- | Parsed `tscn` file.
 data TscnParsed =
   TscnParsed
   { _tscnParsedDescriptor :: TscnDescriptor
@@ -236,6 +251,7 @@ data TscnParsed =
 
 makeFields ''TscnParsed
 
+-- | `gdns` file descriptor.
 data GdnsDescriptor =
   GdnsDescriptor
   { _gdnsDescriptorTy        :: T.Text
@@ -246,6 +262,7 @@ data GdnsDescriptor =
 
 makeFields ''GdnsDescriptor
 
+-- | Parsed `gdns` file.
 data GdnsParsed =
   GdnsParsed
   { _gdnsParsedDescriptor :: GdnsDescriptor
@@ -255,6 +272,7 @@ data GdnsParsed =
 
 makeFields ''GdnsParsed
 
+-- | Parsed godot resource file.
 data GodotParsed
   = Tscn TscnParsed
   | Gdns GdnsParsed
