@@ -1,0 +1,23 @@
+[other_header load_steps=4 format=2]
+
+[ext_resource path="res://Assets/libimperium.gdnlib" type="GDNativeLibrary" id=1]
+
+[sub_resource type="NativeScript" id=1]
+resource_name = "EntityMap"
+class_name = "EntityMap"
+library = ExtResource( 1 )
+
+[sub_resource type="PlaneMesh" id=2]
+size = Vector2( 20, 20 )
+
+[node name="EntityMap" type="Spatial"]
+script = SubResource( 1 )
+
+[node name="MeshInstance" type="MeshInstance" parent="."]
+mesh = SubResource( 2 )
+material/0 = null
+
+[node name="HoverCamera" type="Camera" parent="."]
+transform = Transform( 1, 0, 0, 0, -4.37114e-08, 1, 0, -1, -4.37114e-08, 0, 12.8284, 0 )
+
+[node name="Entities" type="Spatial" parent="."]
