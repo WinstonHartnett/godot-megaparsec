@@ -170,6 +170,69 @@ unGodotArr' k = fromJust . unGodotArr k
 
 collectRest its = M.filterWithKey (\k _ -> k `S.member` S.fromList its)
 
+data ExtResource =
+  ExtResource
+  { _extResourcePath    :: T.Text
+  , _extResourceTy      :: T.Text
+  , _extResourceId      :: Int
+    -- | Other header information.
+  , _extResourceHeaders :: M.HashMap T.Text GodotValue
+    -- | Body of the configuration entry.
+  , _extResourceEntries :: M.HashMap T.Text GodotValue
+  }
+  deriving (Show, Generic)
+
+data SubResource =
+  SubResource
+  { _subResourceTy      :: T.Text
+  , _subResourceId      :: Int
+    -- | Other header information.
+  , _subResourceHeaders :: M.HashMap T.Text GodotValue
+    -- | Body of the configuration entry.
+  , _subResourceEntries :: M.HashMap T.Text GodotValue
+  }
+  deriving (Show, Generic)
+
+data Node =
+  Node
+    { _nodeTy :: Maybe T.Text
+    , _nodeName :: T.Text
+      -- | If `Nothing`, then this node is the root.
+    , _nodeParent :: Maybe T.Text
+      -- | Instance refers to an `ExtResource` ID, usually listed at the top of a file.
+    , _nodeInst :: Maybe Int
+    , _nodeInstPlaceholder :: Maybe T.Text
+    , _nodeOwner :: Maybe T.Text
+    , _nodeIndex :: Maybe Int
+    , _nodeGroups :: Maybe [T.Text]
+      -- | Other header information.
+    , _nodeHeaders :: M.HashMap T.Text GodotValue
+      -- | Body of the configuration entry.
+    , _nodeEntries :: M.HashMap T.Text GodotValue
+    }
+    deriving (Show, Generic)
+
+data Connection =
+  Connection
+    { _connectionSignal  :: T.Text
+    , _connectionFrom    :: T.Text
+    , _connectionTo      :: T.Text
+    , _connectionMethod  :: T.Text
+      -- | Other header information.
+    , _connectionHeaders :: M.HashMap T.Text GodotValue
+      -- | Body of the configuration entry.
+    , _connectionEntries :: M.HashMap T.Text GodotValue
+    }
+    deriving (Show, Generic)
+
+data Resource =
+  Resource
+    { _resourceResourceName :: Maybe T.Text
+    , _resourceClassName    :: Maybe T.Text
+    , _resourceLibrary      :: Maybe (T.Text, [GodotValue])
+    }
+    deriving (Show, Generic)
+
 -- | Godot resource section prefixed with a bracket-enclosed header, optionally
 -- with body entries.
 --
@@ -178,54 +241,11 @@ collectRest its = M.filterWithKey (\k _ -> k `S.member` S.fromList its)
 -- Note that explicitly specified section fields are not duplicated in `headers` and
 -- `entries` fields.
 data GodotSection
-  = ExtResourceSection
-    { _extResourceSectionPath    :: T.Text
-    , _extResourceSectionTy      :: T.Text
-    , _extResourceSectionId      :: Int
-      -- | Other header information.
-    , _extResourceSectionHeaders :: M.HashMap T.Text GodotValue
-      -- | Body of the configuration entry.
-    , _extResourceSectionEntries :: M.HashMap T.Text GodotValue
-    }
-  | SubResourceSection
-    { _subResourceSectionTy      :: T.Text
-    , _subResourceSectionId      :: Int
-      -- | Other header information.
-    , _subResourceSectionHeaders :: M.HashMap T.Text GodotValue
-      -- | Body of the configuration entry.
-    , _subResourceSectionEntries :: M.HashMap T.Text GodotValue
-    }
-  | NodeSection
-    { _nodeSectionTy :: Maybe T.Text
-    , _nodeSectionName :: T.Text
-      -- | If `Nothing`, then this node is the root.
-    , _nodeSectionParent :: Maybe T.Text
-      -- | Instance refers to an `ExtResource` ID, usually listed at the top of a file.
-    , _nodeSectionInst :: Maybe Int
-    , _nodeSectionInstPlaceholder :: Maybe T.Text
-    , _nodeSectionOwner :: Maybe T.Text
-    , _nodeSectionIndex :: Maybe Int
-    , _nodeSectionGroups :: Maybe [T.Text]
-      -- | Other header information.
-    , _nodeSectionHeaders :: M.HashMap T.Text GodotValue
-      -- | Body of the configuration entry.
-    , _nodeSectionEntries :: M.HashMap T.Text GodotValue
-    }
-  | ConnectionSection
-    { _connectionSectionSignal  :: T.Text
-    , _connectionSectionFrom    :: T.Text
-    , _connectionSectionTo      :: T.Text
-    , _connectionSectionMethod  :: T.Text
-      -- | Other header information.
-    , _connectionSectionHeaders :: M.HashMap T.Text GodotValue
-      -- | Body of the configuration entry.
-    , _connectionSectionEntries :: M.HashMap T.Text GodotValue
-    }
-  | ResourceSection
-    { _resourceSectionResourceName :: Maybe T.Text
-    , _resourceSectionClassName    :: Maybe T.Text
-    , _resourceSectionLibrary      :: Maybe (T.Text, [GodotValue])
-    }
+  = ExtResourceSection ExtResource
+  | SubResourceSection SubResource
+  | NodeSection Node
+  | ConnectionSection Connection
+  | ResourceSection Resource
   | OtherSection
     { _otherSectionHeader  :: T.Text
     , _otherSectionHeaders :: M.HashMap T.Text GodotValue
@@ -314,33 +334,33 @@ bodyAndKvs = do
 -- conversion function.
 headerWrapper
   :: T.Text
-  -> (M.HashMap T.Text GodotValue -> M.HashMap T.Text GodotValue -> GodotSection)
-  -> Parser GodotSection
+  -> (M.HashMap T.Text GodotValue -> M.HashMap T.Text GodotValue -> a)
+  -> Parser a
 headerWrapper targetSect p = do
   (headerName, headerKvs', bodyKvs) <- bodyAndKvs
   unless (headerName == targetSect) (fail "mismatched expected header")
   pure $ p headerKvs' bodyKvs
 
 -- | Parse a `[sub_resource]` section.
-tscnSubResourceP :: Parser GodotSection
+tscnSubResourceP :: Parser SubResource
 tscnSubResourceP =
   headerWrapper "sub_resource"
-  (\kvs bodyKvs -> SubResourceSection (unGodotString' "type" kvs) (unGodotInt' "id" kvs)
+  (\kvs bodyKvs -> SubResource (unGodotString' "type" kvs) (unGodotInt' "id" kvs)
    (collectRest ["type", "id"] kvs) bodyKvs)
 
 -- | Parse an `[ext_resource]` section.
-tscnExtResourceP :: Parser GodotSection
+tscnExtResourceP :: Parser ExtResource
 tscnExtResourceP =
   headerWrapper "ext_resource"
-  (\kvs bodyKvs -> ExtResourceSection (unGodotString' "path" kvs)
+  (\kvs bodyKvs -> ExtResource (unGodotString' "path" kvs)
    (unGodotString' "type" kvs) (unGodotInt' "id" kvs)
    (collectRest ["path", "type", "id"] kvs) bodyKvs)
 
 -- | Parse a `[node]` section.
-tscnNodeP :: Parser GodotSection
+tscnNodeP :: Parser Node
 tscnNodeP =
   headerWrapper "node"
-  (\kvs bodyKvs -> NodeSection (unGodotString "type" kvs) (unGodotString' "name" kvs)
+  (\kvs bodyKvs -> Node (unGodotString "type" kvs) (unGodotString' "name" kvs)
    (unGodotString "parent" kvs)
    ((\(GodotInt i) -> i) . head . snd <$> unGodotConstructor "instance" kvs)
    (unGodotString "instance_placeholder" kvs) (unGodotString "owner" kvs)
@@ -357,10 +377,10 @@ tscnNodeP =
     , "groups"] kvs) bodyKvs)
 
 -- | Parse a `[connection]` section.
-tscnConnectionP :: Parser GodotSection
+tscnConnectionP :: Parser Connection
 tscnConnectionP =
   headerWrapper "connection"
-  (\kvs bodyKvs -> ConnectionSection (unGodotString' "signal" kvs)
+  (\kvs bodyKvs -> Connection (unGodotString' "signal" kvs)
    (unGodotString' "from" kvs) (unGodotString' "to" kvs) (unGodotString' "method" kvs)
    (collectRest ["signal", "from", "to", "method"] kvs) bodyKvs)
 
@@ -379,15 +399,15 @@ tscnParser = do
       sectionP  =
         P.choice
         (map P.try
-         [tscnConnectionP, tscnExtResourceP, tscnSubResourceP, tscnNodeP, otherP])
+         [ConnectionSection <$> tscnConnectionP, ExtResourceSection <$> tscnExtResourceP, SubResourceSection <$> tscnSubResourceP, NodeSection <$> tscnNodeP, otherP])
   sections <- P.manyTill sectionP P.eof
   pure $ TscnParsed (TscnDescriptor loadSteps format) sections
 
 -- | Parse a `[resource]` section.
-resourceP :: Parser GodotSection
+resourceP :: Parser Resource
 resourceP =
   headerWrapper "resource"
-  (\_ bodyKvs -> ResourceSection (unGodotString "resource_name" bodyKvs)
+  (\_ bodyKvs -> Resource (unGodotString "resource_name" bodyKvs)
    (unGodotString "class_name" bodyKvs) (unGodotConstructor "library" bodyKvs))
 
 -- | Parse a `gdns` file.
@@ -397,7 +417,7 @@ gdnsParser = do
   let ty        = unGodotString' "type" kvs
       loadSteps = unGodotInt' "load_steps" kvs
       format    = unGodotInt' "format" kvs
-      sectionP  = P.choice (map P.try [tscnExtResourceP, resourceP, otherP])
+      sectionP  = P.choice (map P.try [ExtResourceSection <$> tscnExtResourceP, ResourceSection <$> resourceP, otherP])
   sections <- P.manyTill sectionP P.eof
   pure $ GdnsParsed (GdnsDescriptor ty loadSteps format) sections
 
