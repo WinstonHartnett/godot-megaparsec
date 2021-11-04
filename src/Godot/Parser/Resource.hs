@@ -24,6 +24,11 @@ module Godot.Parser.Resource
   ,GdnsDescriptor(..)
   ,GdnsParsed(..)
   ,GodotParsed(..)
+  ,ExtResource(..)
+  ,SubResource(..)
+  ,Node(..)
+  ,Connection(..)
+  ,Resource(..)
   ,tscnParser
   ,gdnsParser
   ,otherParser

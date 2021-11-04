@@ -26,3 +26,13 @@ makeLenses ''OtherDescriptor
 makeLenses ''OtherParsed
 
 makeLenses ''GodotParsed
+
+makeLenses ''ExtResource
+
+makeLenses ''SubResource
+
+makeLenses ''Node
+
+makeLenses ''Connection
+
+makeLenses ''Resource
