@@ -34,8 +34,8 @@ module Godot.Parser.Resource (
 
   -- * Value parsers
   valP,
-  floatP,
-  intP,
+  numP,
+  -- intP,
   boolP,
   stringP,
   arrP,
@@ -89,6 +89,7 @@ import qualified Data.Text.Read as T
 import Data.Void (Void)
 import GHC.Generics (Generic)
 
+import GHC.Real (infinity, numerator)
 import qualified Text.Megaparsec as P
 import qualified Text.Megaparsec.Char as P
 import qualified Text.Megaparsec.Char.Lexer as P (decimal, signed)
@@ -98,8 +99,7 @@ type Parser = P.Parsec Void T.Text
 -- | Wrapped Godot resource format values.
 data GdValue
   = GdCstr (T.Text, [GdValue])
-  | GdInt Int
-  | GdFloat Double
+  | GdNum Rational
   | GdBool Bool
   | GdString T.Text
   | GdDict (HM.HashMap T.Text GdValue)
@@ -110,6 +110,9 @@ data GdValue
 infixl 3 <||>
 (<||>) :: Parser a -> Parser a -> Parser a
 a <||> b = P.try a <|> P.try b
+
+ratToInt :: Rational -> Int
+ratToInt r = fromIntegral (numerator r) `div` fromIntegral (numerator r)
 
 --------------------------------------------------------------------------------
 
@@ -124,28 +127,27 @@ valP = asum $ map (\(t, p) -> (P.try $ P.lookAhead (P.satisfy t) *> p)) ms
     , (\c -> c == 't' || c == 'f', GdBool <$> boolP)
     , ((== 'n'), nullP)
     , (\c -> isUpper c || c == '@', GdCstr <$> cstrP)
-    , (const True, P.try (GdFloat <$> floatP) <|> P.try (GdInt <$> intP))
+    , (const True, P.try (GdNum <$> numP))
     ]
 
--- | Parse resource float.
-floatP :: Parser Double
-floatP = do
-  sign <- opt optSign
-  rational <- takeDigits <> P.string "." <> takeDigits
-  exponent' <- opt $ P.string "e" <> opt optSign <> takeDigits
-  pure
-    . fst
-    . fromRight undefined
-    . T.rational
-    $ sign <> rational <> exponent'
+-- | Parse resource number.
+numP :: Parser Rational
+numP = P.try infP <|> P.try fltP <|> intP
  where
+  infP = P.string "inf" >> pure infinity
+  intP = P.signed P.space P.decimal
+  fltP = do
+    sign <- opt optSign
+    rational <- takeDigits <> P.string "." <> takeDigits
+    exponent' <- opt $ P.string "e" <> opt optSign <> takeDigits
+    pure
+      . fst
+      . fromRight undefined
+      . T.rational
+      $ sign <> rational <> exponent'
   optSign = P.string "-" <|> P.string "+"
   opt = P.option ""
   takeDigits = P.takeWhile1P Nothing isDigit
-
--- | Parser resource int.
-intP :: Parser Int
-intP = P.signed P.space P.decimal
 
 -- | Parse resource bool.
 boolP :: Parser Bool
@@ -327,7 +329,7 @@ extResourceP =
     $ MkExtResource
       <$> jh @"GdString" "path"
       <*> jh @"GdString" "type"
-      <*> jh @"GdInt" "id"
+      <*> (ratToInt <$> jh @"GdNum" "id")
 
 data SubResource = MkSubResource
   { type' :: T.Text
@@ -344,7 +346,7 @@ subResourceP =
     "sub_resource"
     $ MkSubResource
       <$> jh @"GdString" "type"
-      <*> jh @"GdInt" "id"
+      <*> (ratToInt <$> jh @"GdNum" "id")
 
 data Node = MkNode
   { type' :: Maybe T.Text
@@ -369,10 +371,10 @@ nodeP =
       <$> jh' @"GdString" "type"
       <*> jh @"GdString" "name"
       <*> jh' @"GdString" "parent"
-      <*> (jh' @"GdCstr" "instance" <&> (^? (_Just . _2 . ix 0 . _Ctor @"GdInt")))
+      <*> (jh' @"GdCstr" "instance" <&> (^? (_Just . _2 . ix 0 . _Ctor @"GdNum")) <&> fmap ratToInt)
       <*> jh' @"GdString" "instance_placeholder"
       <*> jh' @"GdString" "owner"
-      <*> jh' @"GdInt" "index"
+      <*> (fmap ratToInt <$> jh' @"GdNum" "index")
       <*> ( jh' @"GdArr" "groups"
               & over
                 ( mapped
@@ -451,8 +453,8 @@ data TscnParsed = MkTscnParsed
 tscnP :: Parser TscnParsed
 tscnP = do
   kvs <- P.string "[gd_scene " *> headerKvsP <* P.char ']' <* P.space
-  let loadSteps' = jq @"GdInt" "load_steps" fromJust kvs
-      format' = jq @"GdInt" "format" fromJust kvs
+  let loadSteps' = ratToInt $ jq @"GdNum" "load_steps" fromJust kvs
+      format' = ratToInt $ jq @"GdNum" "format" fromJust kvs
   sections' <- P.manyTill sectionP P.eof
   pure $ MkTscnParsed loadSteps' format' sections'
  where
